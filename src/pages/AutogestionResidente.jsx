@@ -5,11 +5,11 @@ const AutogestionResidente = () => {
     const [reservas, setReservas] = useState([]);
     const [cargando, setCargando] = useState(true);
     const [error, setError] = useState('');
+    const [exito, setExito] = useState(false);
 
-    // Estados simplificados para el formulario
     const [idResidente, setIdResidente] = useState('');
     const [fechaReserva, setFechaReserva] = useState('');
-    const [turnoSeleccionado, setTurnoSeleccionado] = useState('12:00:00-17:00:00'); // Turno por defecto
+    const [turnoSeleccionado, setTurnoSeleccionado] = useState('12:00:00-17:00:00');
 
     const cargarReservas = async () => {
         try {
@@ -22,88 +22,308 @@ const AutogestionResidente = () => {
         }
     };
 
-    useEffect(() => {
-        cargarReservas();
-    }, []);
+    useEffect(() => { cargarReservas(); }, []);
 
     const manejarSubmit = async (e) => {
         e.preventDefault();
         setError('');
-        
-        // Separamos el turno seleccionado en horaInicio y horaFin
+        setExito(false);
         const [inicio, fin] = turnoSeleccionado.split('-');
-
         try {
-            const nuevaReserva = {
+            await api.post('/reservas', {
                 residente: { idResidente: parseInt(idResidente) },
-                fechaReserva: fechaReserva,
+                fechaReserva,
                 horaInicio: inicio,
                 horaFin: fin
-            };
-
-            await api.post('/reservas', nuevaReserva);
-            alert('¡Turno reservado con éxito en Kaislo Rooftop!');
-            
-            setIdResidente(''); setFechaReserva('');
+            });
+            setExito(true);
+            setIdResidente('');
+            setFechaReserva('');
             setTurnoSeleccionado('12:00:00-17:00:00');
             cargarReservas();
-            
+            setTimeout(() => setExito(false), 4000);
         } catch (err) {
-            setError(err.response?.data || "Error al reservar. El turno ya está ocupado o el ID no existe.");
+            setError(err.response?.data || "El turno ya está ocupado o el ID no existe.");
         }
     };
 
-    return (
-        <div style={{ padding: '40px', fontFamily: 'system-ui, sans-serif', maxWidth: '800px', margin: '0 auto' }}>
-            <h1 style={{ textAlign: 'center' }}>Zona de Parrillas - Kaislo Rooftop</h1>
-            <p style={{ textAlign: 'center', color: '#666' }}>Modelo Self-Service: Recuerda dejar el área limpia al finalizar tu turno.</p>
-            
-            {/* --- FORMULARIO CON TURNOS FIJOS --- */}
-            <div style={{ backgroundColor: '#f4f4f5', padding: '20px', borderRadius: '8px', marginBottom: '30px' }}>
-                <h3 style={{ marginTop: 0 }}>Reservar un Turno</h3>
-                {error && <p style={{ color: 'red', fontWeight: 'bold' }}>{error}</p>}
-                
-                <form onSubmit={manejarSubmit} style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                    <div>
-                        <label>ID Residente:</label><br/>
-                        <input type="number" required value={idResidente} onChange={e => setIdResidente(e.target.value)} style={{ padding: '8px', width: '100px' }} />
-                    </div>
-                    <div>
-                        <label>Fecha:</label><br/>
-                        <input type="date" required value={fechaReserva} onChange={e => setFechaReserva(e.target.value)} style={{ padding: '8px' }} />
-                    </div>
-                    <div>
-                        <label>Horario Fijo:</label><br/>
-                        <select value={turnoSeleccionado} onChange={e => setTurnoSeleccionado(e.target.value)} style={{ padding: '8px', cursor: 'pointer' }}>
-                            <option value="12:00:00-17:00:00">Turno Tarde (12:00 PM - 05:00 PM)</option>
-                            <option value="18:00:00-23:00:00">Turno Noche (06:00 PM - 11:00 PM)</option>
-                        </select>
-                    </div>
-                    <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#000', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                        Confirmar Turno
-                    </button>
-                </form>
-            </div>
+    const formatearFecha = (fecha) => {
+        if (!fecha) return '';
+        const [y, m, d] = fecha.split('-');
+        return `${d}/${m}/${y}`;
+    };
 
-            {/* --- LISTA DE RESERVAS --- */}
-            <h2>Turnos Confirmados</h2>
-            {cargando ? (
-                <p>Cargando datos...</p>
-            ) : reservas.length === 0 ? (
-                <p>No hay reservas activas. ¡Sé el primero!</p>
-            ) : (
-                <ul style={{ listStyle: 'none', padding: 0 }}>
-                    {reservas.map((reserva) => (
-                        <li key={reserva.idReserva} style={{ border: '1px solid #ddd', margin: '10px 0', padding: '15px', borderRadius: '8px' }}>
-                            <strong>Fecha:</strong> {reserva.fechaReserva} | 
-                            <strong> Horario:</strong> {reserva.horaInicio} a {reserva.horaFin} | 
-                            <strong> Estado:</strong> <span style={{ color: reserva.estado === 'Confirmada' ? 'green' : 'red', fontWeight: 'bold' }}> {reserva.estado}</span>
-                        </li>
-                    ))}
-                </ul>
-            )}
+    const turnoLabel = (inicio) =>
+        inicio?.startsWith('12') ? '🌤 Tarde' : '🌙 Noche';
+
+    return (
+        <div style={s.page}>
+            {/* HEADER */}
+            <header style={s.header}>
+                <div style={s.headerInner}>
+                    <div style={s.flame}>🔥</div>
+                    <div>
+                        <h1 style={s.title}>Kaislo Rooftop</h1>
+                        <p style={s.subtitle}>Zona de Parrillas — Self Service</p>
+                    </div>
+                </div>
+                <p style={s.notice}>Recuerda dejar el área limpia al finalizar tu turno</p>
+            </header>
+
+            <main style={s.main}>
+                {/* FORMULARIO */}
+                <section style={s.card}>
+                    <h2 style={s.cardTitle}>
+                        <span style={s.dot} />
+                        Reservar un Turno
+                    </h2>
+
+                    {error && (
+                        <div style={s.alertError}>
+                            <span>⚠️</span> {error}
+                        </div>
+                    )}
+                    {exito && (
+                        <div style={s.alertSuccess}>
+                            <span>✅</span> ¡Turno reservado con éxito!
+                        </div>
+                    )}
+
+                    <form onSubmit={manejarSubmit} style={s.form}>
+                        <div style={s.formGrid}>
+                            <div style={s.field}>
+                                <label style={s.label}>ID Residente</label>
+                                <input
+                                    type="number"
+                                    required
+                                    value={idResidente}
+                                    onChange={e => setIdResidente(e.target.value)}
+                                    placeholder="Ej: 101"
+                                    style={s.input}
+                                />
+                            </div>
+                            <div style={s.field}>
+                                <label style={s.label}>Fecha</label>
+                                <input
+                                    type="date"
+                                    required
+                                    value={fechaReserva}
+                                    onChange={e => setFechaReserva(e.target.value)}
+                                    style={s.input}
+                                />
+                            </div>
+                            <div style={s.field}>
+                                <label style={s.label}>Horario</label>
+                                <select
+                                    value={turnoSeleccionado}
+                                    onChange={e => setTurnoSeleccionado(e.target.value)}
+                                    style={s.input}
+                                >
+                                    <option value="12:00:00-17:00:00">🌤 Tarde (12:00 PM – 5:00 PM)</option>
+                                    <option value="18:00:00-23:00:00">🌙 Noche (6:00 PM – 11:00 PM)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" style={s.btn}>
+                            Confirmar Turno →
+                        </button>
+                    </form>
+                </section>
+
+                {/* LISTA */}
+                <section style={{ marginTop: '36px' }}>
+                    <h2 style={s.sectionTitle}>Turnos Confirmados</h2>
+
+                    {cargando ? (
+                        <p style={s.empty}>Cargando...</p>
+                    ) : reservas.length === 0 ? (
+                        <p style={s.empty}>No hay reservas activas. ¡Sé el primero!</p>
+                    ) : (
+                        <div style={s.grid}>
+                            {reservas.map((r) => (
+                                <div key={r.idReserva} style={s.reservaCard}>
+                                    <div style={s.reservaTop}>
+                                        <span style={s.turnoTag}>{turnoLabel(r.horaInicio)}</span>
+                                        <span style={{
+                                            ...s.estadoBadge,
+                                            background: r.estado === 'Confirmada' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                                            color: r.estado === 'Confirmada' ? '#22c55e' : '#ef4444',
+                                        }}>
+                                            {r.estado}
+                                        </span>
+                                    </div>
+                                    <p style={s.reservaFecha}>📅 {formatearFecha(r.fechaReserva)}</p>
+                                    <p style={s.reservaHora}>🕐 {r.horaInicio?.slice(0,5)} – {r.horaFin?.slice(0,5)}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </section>
+            </main>
         </div>
     );
+};
+
+// ── ESTILOS ──────────────────────────────────────────────
+const s = {
+    page: {
+        minHeight: '100vh',
+        background: '#0f0f11',
+        fontFamily: "'Inter', system-ui, sans-serif",
+        color: '#a1a1aa',
+    },
+    header: {
+        background: 'linear-gradient(135deg, #1a1a1f 0%, #0f0f11 100%)',
+        borderBottom: '1px solid #2e2e36',
+        padding: '32px 24px 24px',
+        textAlign: 'center',
+    },
+    headerInner: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '16px',
+        marginBottom: '8px',
+    },
+    flame: { fontSize: '40px' },
+    title: {
+        fontSize: '32px',
+        fontWeight: '700',
+        color: '#f4f4f5',
+        margin: 0,
+        letterSpacing: '-0.5px',
+    },
+    subtitle: {
+        fontSize: '13px',
+        color: '#f97316',
+        margin: '2px 0 0',
+        fontWeight: '500',
+        textTransform: 'uppercase',
+        letterSpacing: '1px',
+    },
+    notice: {
+        fontSize: '13px',
+        color: '#52525b',
+        margin: '8px 0 0',
+    },
+    main: {
+        maxWidth: '720px',
+        margin: '0 auto',
+        padding: '36px 20px',
+    },
+    card: {
+        background: '#1a1a1f',
+        border: '1px solid #2e2e36',
+        borderRadius: '16px',
+        padding: '28px',
+    },
+    cardTitle: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        fontSize: '18px',
+        fontWeight: '600',
+        color: '#f4f4f5',
+        margin: '0 0 20px',
+    },
+    dot: {
+        width: '8px',
+        height: '8px',
+        borderRadius: '50%',
+        background: '#f97316',
+        display: 'inline-block',
+        flexShrink: 0,
+    },
+    alertError: {
+        background: 'rgba(239,68,68,0.1)',
+        border: '1px solid rgba(239,68,68,0.3)',
+        color: '#fca5a5',
+        borderRadius: '8px',
+        padding: '10px 14px',
+        fontSize: '14px',
+        marginBottom: '16px',
+        display: 'flex',
+        gap: '8px',
+        alignItems: 'center',
+    },
+    alertSuccess: {
+        background: 'rgba(34,197,94,0.1)',
+        border: '1px solid rgba(34,197,94,0.3)',
+        color: '#86efac',
+        borderRadius: '8px',
+        padding: '10px 14px',
+        fontSize: '14px',
+        marginBottom: '16px',
+        display: 'flex',
+        gap: '8px',
+        alignItems: 'center',
+    },
+    form: { display: 'flex', flexDirection: 'column', gap: '20px' },
+    formGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: '16px',
+    },
+    field: { display: 'flex', flexDirection: 'column', gap: '6px' },
+    label: { fontSize: '12px', fontWeight: '500', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.5px' },
+    input: {
+        background: '#0f0f11',
+        border: '1px solid #2e2e36',
+        borderRadius: '8px',
+        padding: '10px 12px',
+        color: '#f4f4f5',
+        fontSize: '14px',
+        outline: 'none',
+        width: '100%',
+        colorScheme: 'dark',
+    },
+    btn: {
+        background: '#f97316',
+        color: '#fff',
+        border: 'none',
+        borderRadius: '8px',
+        padding: '12px 24px',
+        fontSize: '15px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        alignSelf: 'flex-start',
+        letterSpacing: '0.2px',
+    },
+    sectionTitle: {
+        fontSize: '18px',
+        fontWeight: '600',
+        color: '#f4f4f5',
+        marginBottom: '16px',
+    },
+    empty: { color: '#52525b', fontSize: '14px', textAlign: 'center', padding: '40px 0' },
+    grid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+        gap: '12px',
+    },
+    reservaCard: {
+        background: '#1a1a1f',
+        border: '1px solid #2e2e36',
+        borderRadius: '12px',
+        padding: '16px',
+    },
+    reservaTop: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '12px',
+    },
+    turnoTag: { fontSize: '13px', fontWeight: '500', color: '#f4f4f5' },
+    estadoBadge: {
+        fontSize: '11px',
+        fontWeight: '600',
+        padding: '3px 8px',
+        borderRadius: '20px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+    },
+    reservaFecha: { fontSize: '13px', color: '#a1a1aa', margin: '0 0 4px' },
+    reservaHora: { fontSize: '12px', color: '#52525b', margin: 0 },
 };
 
 export default AutogestionResidente;
