@@ -61,7 +61,6 @@ const AutogestionResidente = () => {
             {/* HEADER */}
             <header style={s.header}>
                 <div style={s.headerInner}>
-                    <div style={s.flame}>🔥</div>
                     <div>
                         <h1 style={s.title}>Kaislo Rooftop</h1>
                         <p style={s.subtitle}>Zona de Parrillas — Self Service</p>
