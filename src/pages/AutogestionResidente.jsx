@@ -1,446 +1,395 @@
 import { useState, useEffect } from 'react';
 import api from '../services/api';
 
+import DatePicker, { registerLocale } from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
+import { es } from 'date-fns/locale/es'; 
+
+
+registerLocale('es', es);
+
+const TURNOS_DISPONIBLES = [
+    { id: '12:00:00-15:00:00', label: '12:00 PM - 03:00 PM', icono: '☀️' },
+    { id: '15:00:00-18:00:00', label: '03:00 PM - 06:00 PM', icono: '🌤️' },
+    { id: '18:00:00-21:00:00', label: '06:00 PM - 09:00 PM', icono: '🌙' },
+    { id: '21:00:00-00:00:00', label: '09:00 PM - 12:00 AM', icono: '✨' }
+];
+
 const AutogestionResidente = () => {
-    const [reservas, setReservas] = useState([]);
-    const [cargando, setCargando] = useState(true);
-    const [error, setError] = useState('');
-    const [exito, setExito] = useState(false);
+    // SESIÓN DEL VECINO
+    const [residenteLogueado, setResidenteLogueado] = useState(null); // Guarda { numeroDepartamento, pinAcceso }
+    const [vistaActual, setVistaActual] = useState('NUEVA_RESERVA'); // 'NUEVA_RESERVA' o 'MIS_RESERVAS'
 
-    // Solo debe existir UNA copia de este bloque:
-    const [idResidente, setIdResidente] = useState('');
-    const [pin, setPin] = useState(''); // El nuevo estado del PIN
+    // ESTADOS FORMULARIO LOGIN
+    const [depaLogin, setDepaLogin] = useState('');
+    const [pinLogin, setPinLogin] = useState('');
+    const [errorLogin, setErrorLogin] = useState('');
+
+    // ESTADOS RESERVA
     const [fechaReserva, setFechaReserva] = useState('');
-    const [turnoSeleccionado, setTurnoSeleccionado] = useState('12:00:00-17:00:00');
+    const [turnoSeleccionado, setTurnoSeleccionado] = useState('');
+    
+    // DATOS DEL SISTEMA
+    const [todasLasReservas, setTodasLasReservas] = useState([]);
+    const [procesando, setProcesando] = useState(false);
+    const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
+    const [mostrarModal, setMostrarModal] = useState(false);
 
-    const [paginaActual, setPaginaActual] = useState(0);
-    const [totalPaginas, setTotalPaginas] = useState(0);
+    useEffect(() => {
+        // 1. Buscamos en la bóveda del navegador
+        const tokenGuardado = localStorage.getItem('vecino_token');
+        const depaGuardado = localStorage.getItem('vecino_depa');
 
-    //para prevenir el spam de clics
-    const [enviando, setEnviando] = useState(false);
+        // 2. Si ambas cosas existen, significa que el usuario ya se había logueado antes
+        if (tokenGuardado && depaGuardado) {
+            // 3. Restauramos la sesión en la memoria RAM de React
+            setResidenteLogueado({ 
+                numeroDepartamento: depaGuardado 
+            });
+        }
+    }, []);
 
-    // Función para obtener la fecha de hoy en formato YYYY-MM-DD
-    const obtenerFechaHoy = () => {
-        const hoy = new Date();
-        const yyyy = hoy.getFullYear();
-        const mm = String(hoy.getMonth() + 1).padStart(2, '0');
-        const dd = String(hoy.getDate()).padStart(2, '0');
-        return `${yyyy}-${mm}-${dd}`;
-    };
-
-    const cargarReservas = async () => {
-            try {
-                // Le enviamos la página actual al servidor
-                const respuesta = await api.get(`/reservas?page=${paginaActual}&size=6`); // Traemos de 6 en 6 para que la cuadrícula se vea simétrica
-                setReservas(respuesta.data.content || []);
-                setTotalPaginas(respuesta.data.totalPages || 0); // Guardamos el total de páginas
-            } catch (error) {
-                console.error("Error al cargar:", error);
-            } finally {
-                setCargando(false);
-            }
-        };
-
-        // Ahora React volverá a cargar si el usuario cambia de página
-        useEffect(() => { 
-            cargarReservas(); 
-        }, [paginaActual]);
-
-
-    // Analiza si el turno seleccionado ya está tomado en la fecha elegida
-    const verificarTurnoOcupado = () => {
-        if (!fechaReserva) return false;
-        const [inicioSel, finSel] = turnoSeleccionado.split('-');
-        
-        return reservas.some(reserva => 
-            reserva.fechaReserva === fechaReserva && 
-            reserva.horaInicio === inicioSel && 
-            reserva.horaFin === finSel &&
-            reserva.estado === 'Confirmada'
-        );
-    };
-
-    const turnoYaReservado = verificarTurnoOcupado();
-
-    const manejarSubmit = async (e) => {
-        e.preventDefault();
-        
-        
-        if (enviando) return; 
-
-        setError('');
-        setEnviando(true); 
-        
-        const [inicio, fin] = turnoSeleccionado.split('-');
-
+    const cargarReservasGlobales = async () => {
         try {
-            const nuevaReserva = {
-                residente: { 
-                    idResidente: parseInt(idResidente),
-                    pinAcceso: pin 
-                },
-                fechaReserva: fechaReserva,
-                horaInicio: inicio,
-                horaFin: fin
-            };
-
-            await api.post('/reservas', nuevaReserva);
-            
-            setExito(true);
-            setTimeout(() => setExito(false), 4000);
-            
-            // Limpiamos los campos
-            setIdResidente(''); 
-            setPin(''); 
-            setFechaReserva('');
-            setTurnoSeleccionado('12:00:00-17:00:00');
-            cargarReservas();
-            
-        } catch (err) {
-            setError(err.response?.data || "Error al reservar. El turno ya está ocupado.");
-        } finally {
-            setEnviando(false); 
+            const respuesta = await api.get('/reservas?page=0&size=100'); 
+            const confirmadas = (respuesta.data.content || []).filter(r => r.estado === 'Confirmada');
+            setTodasLasReservas(confirmadas);
+        } catch (error) {
+            console.error("Error al cargar disponibilidad:", error);
         }
     };
 
-    const formatearFecha = (fecha) => {
-        if (!fecha) return '';
-        const [y, m, d] = fecha.split('-');
-        return `${d}/${m}/${y}`;
+    useEffect(() => {
+        if (residenteLogueado) cargarReservasGlobales();
+    }, [residenteLogueado]);
+
+    // --- LÓGICA DE LOGIN ---
+    const manejarLogin = async (e) => {
+        e.preventDefault();
+        setErrorLogin('');
+        setMensaje({ texto: '', tipo: '' }); // Limpiamos alertas previas
+        setProcesando(true);
+        try {
+            // Recibimos la respuesta completa que ahora trae el token
+            const respuesta = await api.post('/reservas/vecino/login', { 
+                numeroDepartamento: depaLogin, 
+                pinAcceso: pinLogin 
+            });
+            
+            //Guardamos el token y el depa en el LocalStorage
+            localStorage.setItem('vecino_token', respuesta.data.token);
+            localStorage.setItem('vecino_depa', respuesta.data.numeroDepartamento); // <-- ¡ESTA LÍNEA FALTABA!
+            
+            // Guardamos el estado para la interfaz
+            setResidenteLogueado({ 
+                numeroDepartamento: respuesta.data.numeroDepartamento, 
+                pinAcceso: pinLogin 
+            });
+        } catch (err) {
+            setErrorLogin('Departamento o PIN incorrectos.');
+        } finally {
+            setProcesando(false);
+        }
     };
 
-    const turnoLabel = (inicio) =>
-        inicio?.startsWith('12') ? '🌤 Tarde' : '🌙 Noche';
+    const cerrarSesion = () => {
+        setResidenteLogueado(null);
+        setDepaLogin('');
+        setPinLogin('');
+        setVistaActual('NUEVA_RESERVA');
+        setMensaje({ texto: '', tipo: '' });
+        setFechaReserva('');
+        setTurnoSeleccionado('');
+        
+        //LIMPIEZA: Borramos la llave al salir
+        localStorage.removeItem('vecino_token');
+    };
 
+    // --- LÓGICA DE RESERVAS ---
+    const esTurnoOcupado = (idTurno) => {
+        if (!fechaReserva) return false;
+        const [inicio, fin] = idTurno.split('-');
+        return todasLasReservas.some(r => r.fechaReserva === fechaReserva && r.horaInicio === inicio && r.horaFin === fin);
+    };
+
+    const confirmarReserva = async () => {
+        setProcesando(true);
+        const [inicio, fin] = turnoSeleccionado.split('-');
+
+        try {
+            await api.post('/reservas', {
+                residente: { numeroDepartamento: residenteLogueado.numeroDepartamento, pinAcceso: residenteLogueado.pinAcceso },
+                fechaReserva, horaInicio: inicio, horaFin: fin
+            });
+            
+            setMensaje({ texto: '¡Reserva confirmada!', tipo: 'exito' });
+            setFechaReserva('');
+            setTurnoSeleccionado('');
+            setMostrarModal(false);
+            cargarReservasGlobales();
+            setVistaActual('MIS_RESERVAS'); // Lo mandamos a ver su reserva
+            setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
+        } catch (error) {
+            setMostrarModal(false);
+            setMensaje({ texto: error.response?.data || "Error al reservar.", tipo: 'error' });
+        } finally {
+            setProcesando(false);
+        }
+    };
+
+    const cancelarMiReserva = async (idReserva) => {
+        if (window.confirm("¿Seguro que deseas cancelar esta reserva? Este horario quedará libre para otros vecinos.")) {
+            try {
+                await api.put(`/reservas/${idReserva}/estado?estado=Cancelada`);
+                cargarReservasGlobales();
+            } catch (err) {
+                alert("Error al cancelar.");
+            }
+        }
+    };
+
+    // Filtramos para mostrar solo las reservas del vecino logueado
+    const misReservas = todasLasReservas.filter(r => r.residente?.numeroDepartamento === residenteLogueado?.numeroDepartamento);
+    const fechaMinima = new Date().toISOString().split('T')[0];
+
+    // ==========================================
+    // PANTALLA 1: LOGIN VECINO (Wireframe 1)
+    // ==========================================
+    if (!residenteLogueado) {
+        return (
+            <div style={s.contenedorCentrado}>
+                <div style={s.tarjeta}>
+                    <div style={s.cabecera}>
+                        <h1 style={s.titulo}>Kaislo Rooftop</h1>
+                        <p style={s.subtitulo}>Portal de Residentes</p>
+                    </div>
+                    <form onSubmit={manejarLogin} style={{ padding: '30px 24px' }}>
+                        {errorLogin && <p style={s.alertaError}>{errorLogin}</p>}
+                        <div style={s.field}>
+                            <label style={s.label}>N° Departamento</label>
+                            <input type="text" required value={depaLogin} onChange={e => setDepaLogin(e.target.value)} placeholder="Ej: 101" style={s.inputBlanco} />
+                        </div>
+                        <div style={{ ...s.field, marginTop: '16px' }}>
+                            <label style={s.label}>PIN de Acceso</label>
+                            <input type="password" required value={pinLogin} onChange={e => setPinLogin(e.target.value)} placeholder="••••" maxLength="4" style={s.inputBlanco} />
+                        </div>
+                        <button type="submit" disabled={procesando} style={{ ...s.btnPrimario, marginTop: '24px' }}>
+                            {procesando ? 'Verificando...' : 'Ingresar'}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        );
+    }
+
+    // ==========================================
+    // PANTALLAS 2 Y 3: PORTAL DEL RESIDENTE
+    // ==========================================
     return (
-        <div style={s.page}>
-            {/* HEADER */}
-            <header style={s.header}>
-                <div style={s.headerInner}>
-                    <div>
-                        <h1 style={s.title}>Kaislo Rooftop</h1>
-                        <p style={s.subtitle}>Zona de Parrillas — Self Service</p>
+        <div style={s.contenedorCentrado}>
+            <div style={s.tarjeta}>
+                {/* Cabecera del Portal */}
+                <div style={s.cabecera}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                            <h1 style={s.titulo}>Depa {residenteLogueado.numeroDepartamento}</h1>
+                            <p style={s.subtitulo}>Kaislo Rooftop</p>
+                        </div>
+                        <button onClick={cerrarSesion} style={s.btnSalir}>Salir</button>
                     </div>
                 </div>
-                <p style={s.notice}>Recuerda dejar el área limpia al finalizar tu turno</p>
-            </header>
 
-            <main style={s.main}>
-                {/* FORMULARIO */}
-                <section style={s.card}>
-                    <h2 style={s.cardTitle}>
-                        <span style={s.dot} />
-                        Reservar un Turno
-                    </h2>
-
-                    {error && <p style={s.error}>{error}</p>}
-                    {exito && <p style={s.exito}>¡Reserva confirmada con éxito!</p>}
-                    
-                    {/* ALERTA PREVENTIVA SI EL HORARIO YA ESTÁ RESERVADO */}
-                    {turnoYaReservado && (
-                        <p style={{ 
-                            background: 'rgba(234, 179, 8, 0.1)', 
-                            color: '#eab308', 
-                            padding: '12px', 
-                            borderRadius: '8px', 
-                            fontSize: '14px', 
-                            marginBottom: '16px', 
-                            border: '1px solid rgba(234, 179, 8, 0.2)',
-                            textAlign: 'center'
-                        }}>
-                            ⚠️ Este turno ya se encuentra reservado por otro residente. Por favor, elija otra fecha u horario.
-                        </p>
-                    )}
-
-                    <form onSubmit={manejarSubmit} style={s.form}>
-                        <div style={s.formGrid}>
-                            <div style={s.field}>
-                                <label style={s.label}>ID Residente</label>
-                                <input
-                                    type="number"
-                                    required
-                                    value={idResidente}
-                                    onChange={e => setIdResidente(e.target.value)}
-                                    placeholder="Ej: 101"
-                                    style={s.input}
-                                />
-                            </div>
-
-                            <div>
-                                <label style={{ color: '#f4f4f5', fontSize: '14px', marginBottom: '8px', display: 'block' }}>ID Residente:</label>
-                                <input type="number" required value={idResidente} onChange={e => setIdResidente(e.target.value)} style={s.input} />
-                            </div>
-                            
-                            {/* --- NUEVO INPUT DE PIN --- */}
-                            <div>
-                                <label style={{ color: '#f4f4f5', fontSize: '14px', marginBottom: '8px', display: 'block' }}>PIN de Acceso:</label>
-                                <input type="password" required value={pin} onChange={e => setPin(e.target.value)} style={{...s.input, width: '120px'}} placeholder="****" />
-                            </div>
-                            {/* -------------------------- */}
-                            <div style={s.field}>
-                                <label style={s.label}>Fecha</label>
-                                <input 
-                                    type="date" 
-                                    required 
-                                    value={fechaReserva} 
-                                    min={obtenerFechaHoy()} 
-                                    onChange={e => setFechaReserva(e.target.value)} 
-                                    style={s.input} 
-                                />
-                            </div>
-                            <div style={s.field}>
-                                <label style={s.label}>Horario</label>
-                                <select
-                                    value={turnoSeleccionado}
-                                    onChange={e => setTurnoSeleccionado(e.target.value)}
-                                    style={s.input}
-                                >
-                                    <option value="12:00:00-17:00:00">🌤 Tarde (12:00 PM – 5:00 PM)</option>
-                                    <option value="18:00:00-23:00:00">🌙 Noche (6:00 PM – 11:00 PM)</option>
-                                </select>
-                            </div>
-                        </div>
-                        <button 
-                        type="submit" 
-                        disabled={enviando || turnoYaReservado} // Bloqueado si está cargando o si el turno ya fue tomado
-                        style={{ 
-                            ...s.btn, 
-                            opacity: (enviando || turnoYaReservado) ? 0.5 : 1, 
-                            cursor: (enviando || turnoYaReservado) ? 'not-allowed' : 'pointer' 
-                        }}
-                    >
-                        {enviando ? 'Procesando...' : 'Confirmar Turno'}
+                {/* Navegación de Pestañas */}
+                <div style={s.tabsContainer}>
+                    <button onClick={() => setVistaActual('NUEVA_RESERVA')} style={vistaActual === 'NUEVA_RESERVA' ? s.tabActivo : s.tabInactivo}>
+                        📅 Reservar
                     </button>
-                    </form>
-                </section>
+                    <button onClick={() => setVistaActual('MIS_RESERVAS')} style={vistaActual === 'MIS_RESERVAS' ? s.tabActivo : s.tabInactivo}>
+                        📋 Mis Reservas ({misReservas.length})
+                    </button>
+                </div>
 
-                {/* LISTA */}
-                <section style={{ marginTop: '36px' }}>
-                    <h2 style={s.sectionTitle}>Turnos Confirmados</h2>
+                <div style={{ padding: '24px' }}>
+                    {mensaje.texto && <div style={mensaje.tipo === 'error' ? s.alertaError : s.alertaExito}>{mensaje.texto}</div>}
 
-                    {cargando ? (
-                        <p style={s.empty}>Cargando...</p>
-                    ) : reservas.length === 0 ? (
-                        <p style={s.empty}>No hay reservas activas. ¡Sé el primero!</p>
-                    ) : (
-                        <div style={s.grid}>
-                            {reservas.map((r) => (
-                                <div key={r.idReserva} style={s.reservaCard}>
-                                    <div style={s.reservaTop}>
-                                        <span style={s.turnoTag}>{turnoLabel(r.horaInicio)}</span>
-                                        <span style={{
-                                            ...s.estadoBadge,
-                                            background: r.estado === 'Confirmada' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                                            color: r.estado === 'Confirmada' ? '#22c55e' : '#ef4444',
-                                        }}>
-                                            {r.estado}
-                                        </span>
-                                    </div>
-                                    <p style={s.reservaFecha}>📅 {formatearFecha(r.fechaReserva)}</p>
-                                    <p style={s.reservaHora}>🕐 {r.horaInicio?.slice(0,5)} – {r.horaFin?.slice(0,5)}</p>
+                    {/* VISTA: NUEVA RESERVA (Wireframe 2) */}
+                    {vistaActual === 'NUEVA_RESERVA' && (
+                        <div>
+                            <div style={s.field}>
+                                <label style={s.label}>1. Elige una fecha</label>
+                                
+                                {/* EL NUEVO CALENDARIO */}
+                                <div style={s.calendarioContenedor}>
+                                    <DatePicker
+                                        selected={fechaReserva ? new Date(fechaReserva + 'T12:00:00') : null}
+                                        onChange={(date) => {
+                                            // Convertimos la fecha de JS al formato YYYY-MM-DD que espera Java
+                                            const fechaFormateada = date.toISOString().split('T')[0];
+                                            setFechaReserva(fechaFormateada);
+                                            setTurnoSeleccionado(''); 
+                                        }}
+                                        minDate={new Date()}
+                                        locale="es"
+                                        inline 
+                                    />
                                 </div>
-                            ))}
+                            </div>
+
+                            {fechaReserva && (
+                                <div style={{ marginTop: '24px' }}>
+                                    <label style={s.label}>2. Selecciona un horario</label>
+                                    <div style={s.gridHorarios}>
+                                        {TURNOS_DISPONIBLES.map((turno) => {
+                                            const ocupado = esTurnoOcupado(turno.id);
+                                            const seleccionado = turnoSeleccionado === turno.id;
+                                            return (
+                                                <button key={turno.id} type="button" disabled={ocupado} onClick={() => setTurnoSeleccionado(turno.id)}
+                                                    style={{
+                                                        ...s.btnHorario,
+                                                        background: ocupado ? '#f1f5f9' : seleccionado ? '#1e3a8a' : '#ffffff',
+                                                        color: ocupado ? '#94a3b8' : seleccionado ? '#ffffff' : '#334155',
+                                                        borderColor: seleccionado ? '#1e3a8a' : '#cbd5e1',
+                                                        cursor: ocupado ? 'not-allowed' : 'pointer'
+                                                    }}>
+                                                    <span style={{ fontSize: '18px' }}>{turno.icono}</span>
+                                                    <span style={{ fontWeight: '500', fontSize: '13px', marginTop: '4px' }}>
+                                                        {ocupado ? 'Ocupado' : turno.label}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <button onClick={() => { if(turnoSeleccionado) setMostrarModal(true); else setMensaje({texto: 'Elige un horario', tipo:'error'}) }} style={{ ...s.btnPrimario, marginTop: '24px' }}>
+                                        Confirmar Reserva
+                                    </button>
+
+                                    {/* LISTA DE OCUPADOS DEL DÍA */}
+                                    {fechaReserva && (
+                                        <div style={{ marginTop: '32px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
+                                            <h4 style={{ fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
+                                                Disponibilidad para el {fechaReserva.split('-').reverse().join('-')}:
+                                            </h4>
+                                            
+                                            {todasLasReservas.filter(r => r.fechaReserva === fechaReserva).length === 0 ? (
+                                                <p style={{ fontSize: '13px', color: '#16a34a' }}>✨ ¡Todo el día está libre!</p>
+                                            ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                                    {todasLasReservas
+                                                        .filter(r => r.fechaReserva === fechaReserva)
+                                                        .map(r => {
+                                                            // Buscamos el nombre del turno para mostrarlo bonito
+                                                            const turnoInfo = TURNOS_DISPONIBLES.find(t => t.id === `${r.horaInicio}-${r.horaFin}`);
+                                                            return (
+                                                                <div key={r.idReserva} style={{ display: 'flex', justifyContent: 'space-between', background: '#f1f5f9', padding: '10px 12px', borderRadius: '6px', fontSize: '13px' }}>
+                                                                    <span style={{ color: '#64748b' }}>⏰ {turnoInfo?.label}</span>
+                                                                    <span style={{ fontWeight: '600', color: '#94a3b8' }}>Reservado</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+
+                                </div>
+                            )}
                         </div>
                     )}
 
-                                    {/* CONTROLES DE PAGINACIÓN DEL RESIDENTE */}
-                    {!cargando && totalPaginas > 1 && (
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '24px', alignItems: 'center' }}>
-                            <button 
-                                onClick={() => setPaginaActual(prev => Math.max(prev - 1, 0))}
-                                disabled={paginaActual === 0}
-                                style={{ 
-                                    background: 'transparent', border: '1px solid #2e2e36', color: '#f4f4f5', 
-                                    borderRadius: '6px', padding: '8px 16px', cursor: paginaActual === 0 ? 'not-allowed' : 'pointer',
-                                    opacity: paginaActual === 0 ? 0.5 : 1
-                                }}
-                            >
-                                ← Anteriores
-                            </button>
-                            
-                            <span style={{ color: '#a1a1aa', fontSize: '14px' }}>
-                                Página {paginaActual + 1} de {totalPaginas}
-                            </span>
-                            
-                            <button 
-                                onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas - 1))}
-                                disabled={paginaActual >= totalPaginas - 1}
-                                style={{ 
-                                    background: 'transparent', border: '1px solid #2e2e36', color: '#f4f4f5', 
-                                    borderRadius: '6px', padding: '8px 16px', cursor: paginaActual >= totalPaginas - 1 ? 'not-allowed' : 'pointer',
-                                    opacity: paginaActual >= totalPaginas - 1 ? 0.5 : 1
-                                }}
-                            >
-                                Siguientes →
-                            </button>
+                    {/* VISTA: MIS RESERVAS (Wireframe 3) */}
+                    {vistaActual === 'MIS_RESERVAS' && (
+                        <div>
+                            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#1e293b' }}>Tus horarios confirmados</h3>
+                            {misReservas.length === 0 ? (
+                                <p style={{ color: '#64748b', textAlign: 'center', padding: '20px 0' }}>No tienes reservas activas.</p>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                    {misReservas.map(r => (
+                                        <div key={r.idReserva} style={s.tarjetaReserva}>
+                                            <div>
+                                                <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: '#0f172a' }}>
+                                                    📅 {r.fechaReserva.split('-').reverse().join('-')}
+                                                </p>
+                                                <p style={{ margin: 0, fontSize: '14px', color: '#475569' }}>⏰ {TURNOS_DISPONIBLES.find(t => t.id === `${r.horaInicio}-${r.horaFin}`)?.label || `${r.horaInicio} - ${r.horaFin}`}</p>
+                                            </div>
+                                            <button onClick={() => cancelarMiReserva(r.idReserva)} style={s.btnEliminar}>❌ Cancelar</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
-                </section>
-            </main>
+                </div>
+            </div>
+
+            {/* MODAL DE CONFIRMACIÓN */}
+            {mostrarModal && (
+                <div style={s.modalOverlay}>
+                    <div style={s.modalContenido}>
+                        <h2 style={s.modalTitulo}>Confirmar Reserva</h2>
+                        <div style={s.modalDetalles}>
+                            <p>📅 <strong>{fechaReserva}</strong></p>
+                            <p>⏰ <strong>{TURNOS_DISPONIBLES.find(t => t.id === turnoSeleccionado)?.label}</strong></p>
+                        </div>
+                        <div style={s.modalBotones}>
+                            <button onClick={() => setMostrarModal(false)} disabled={procesando} style={s.btnCancelar}>Volver</button>
+                            <button onClick={confirmarReserva} disabled={procesando} style={s.btnConfirmar}>{procesando ? 'Procesando...' : 'Sí, reservar'}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
-// ── ESTILOS ──────────────────────────────────────────────
+// ESTILOS
 const s = {
-    page: {
-        minHeight: '100vh',
-        background: '#0f0f11',
-        fontFamily: "'Inter', system-ui, sans-serif",
-        color: '#a1a1aa',
-    },
-    header: {
-        background: 'linear-gradient(135deg, #1a1a1f 0%, #0f0f11 100%)',
-        borderBottom: '1px solid #2e2e36',
-        padding: '32px 24px 24px',
-        textAlign: 'center',
-    },
-    headerInner: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '16px',
-        marginBottom: '8px',
-    },
-    flame: { fontSize: '40px' },
-    title: {
-        fontSize: '32px',
-        fontWeight: '700',
-        color: '#f4f4f5',
-        margin: 0,
-        letterSpacing: '-0.5px',
-    },
-    subtitle: {
-        fontSize: '13px',
-        color: '#f97316',
-        margin: '2px 0 0',
-        fontWeight: '500',
-        textTransform: 'uppercase',
-        letterSpacing: '1px',
-    },
-    notice: {
-        fontSize: '13px',
-        color: '#52525b',
-        margin: '8px 0 0',
-    },
-    main: {
-        maxWidth: '720px',
-        margin: '0 auto',
-        padding: '36px 20px',
-    },
-    card: {
-        background: '#1a1a1f',
-        border: '1px solid #2e2e36',
-        borderRadius: '16px',
-        padding: '28px',
-    },
-    cardTitle: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        fontSize: '18px',
-        fontWeight: '600',
-        color: '#f4f4f5',
-        margin: '0 0 20px',
-    },
-    dot: {
-        width: '8px',
-        height: '8px',
-        borderRadius: '50%',
-        background: '#f97316',
-        display: 'inline-block',
-        flexShrink: 0,
-    },
-    alertError: {
-        background: 'rgba(239,68,68,0.1)',
-        border: '1px solid rgba(239,68,68,0.3)',
-        color: '#fca5a5',
-        borderRadius: '8px',
-        padding: '10px 14px',
-        fontSize: '14px',
-        marginBottom: '16px',
-        display: 'flex',
-        gap: '8px',
-        alignItems: 'center',
-    },
-    alertSuccess: {
-        background: 'rgba(34,197,94,0.1)',
-        border: '1px solid rgba(34,197,94,0.3)',
-        color: '#86efac',
-        borderRadius: '8px',
-        padding: '10px 14px',
-        fontSize: '14px',
-        marginBottom: '16px',
-        display: 'flex',
-        gap: '8px',
-        alignItems: 'center',
-    },
-    form: { display: 'flex', flexDirection: 'column', gap: '20px' },
-    formGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        gap: '16px',
-    },
+    contenedorCentrado: { minHeight: '100vh', background: '#f8fafc', padding: '20px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', fontFamily: 'system-ui, sans-serif' },
+    tarjeta: { background: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', overflow: 'hidden', marginTop: '2vh' },
+    cabecera: { background: '#1e3a8a', padding: '24px', color: '#ffffff' },
+    titulo: { margin: 0, fontSize: '22px', fontWeight: '700' },
+    subtitulo: { margin: '4px 0 0 0', fontSize: '14px', opacity: 0.9 },
+    btnSalir: { background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' },
+    
+    // TABS
+    tabsContainer: { display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' },
+    tabActivo: { flex: 1, padding: '14px', background: '#ffffff', border: 'none', borderBottom: '2px solid #1e3a8a', color: '#1e3a8a', fontWeight: '600', fontSize: '14px', cursor: 'pointer' },
+    tabInactivo: { flex: 1, padding: '14px', background: 'transparent', border: 'none', borderBottom: '2px solid transparent', color: '#64748b', fontWeight: '500', fontSize: '14px', cursor: 'pointer' },
+    
+    // FORMULARIO
     field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-    label: { fontSize: '12px', fontWeight: '500', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.5px' },
-    input: {
-        background: '#0f0f11',
-        border: '1px solid #2e2e36',
-        borderRadius: '8px',
-        padding: '10px 12px',
-        color: '#f4f4f5',
-        fontSize: '14px',
-        outline: 'none',
-        width: '100%',
-        colorScheme: 'dark',
-    },
-    btn: {
-        background: '#f97316',
-        color: '#fff',
-        border: 'none',
-        borderRadius: '8px',
-        padding: '12px 24px',
-        fontSize: '15px',
-        fontWeight: '600',
-        cursor: 'pointer',
-        alignSelf: 'flex-start',
-        letterSpacing: '0.2px',
-    },
-    sectionTitle: {
-        fontSize: '18px',
-        fontWeight: '600',
-        color: '#f4f4f5',
-        marginBottom: '16px',
-    },
-    empty: { color: '#52525b', fontSize: '14px', textAlign: 'center', padding: '40px 0' },
-    grid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-        gap: '12px',
-    },
-    reservaCard: {
-        background: '#1a1a1f',
-        border: '1px solid #2e2e36',
-        borderRadius: '12px',
-        padding: '16px',
-    },
-    reservaTop: {
+    label: { fontSize: '13px', fontWeight: '600', color: '#334155' },
+    inputBlanco: { width: '100%', padding: '12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '15px', outline: 'none', background: '#ffffff', color: '#0f172a', boxSizing: 'border-box' },
+    gridHorarios: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
+    btnHorario: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px', border: '2px solid', borderRadius: '10px', transition: 'all 0.2s' },
+    btnPrimario: { width: '100%', padding: '14px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' },
+    
+    // ALERTAS
+    alertaError: { background: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center', border: '1px solid #fecaca', marginBottom: '16px' },
+    alertaExito: { background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center', border: '1px solid #bbf7d0', marginBottom: '16px' },
+    
+    // MIS RESERVAS
+    tarjetaReserva: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '12px' },
+    btnEliminar: { background: '#fee2e2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' },
+    
+    // MODAL
+    modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 1000 },
+    modalContenido: { background: '#ffffff', padding: '24px', borderRadius: '16px', width: '100%', maxWidth: '320px' },
+    modalTitulo: { margin: '0 0 16px 0', fontSize: '18px', color: '#1e293b', textAlign: 'center' },
+    modalDetalles: { background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '24px', fontSize: '15px', color: '#334155', border: '1px solid #e2e8f0' },
+    modalBotones: { display: 'flex', gap: '10px' },
+    btnCancelar: { flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' },
+    btnConfirmar: { flex: 1, padding: '12px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' },
+
+    calendarioContenedor: {
         display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '12px',
+        justifyContent: 'center',
+        marginTop: '10px',
+        // Inyectamos variables CSS para sobreescribir el azul por defecto de la librería por el azul Kaislo
+        '--react-datepicker-bg': '#ffffff',
+        '--react-datepicker-primary-color': '#1e3a8a', 
     },
-    turnoTag: { fontSize: '13px', fontWeight: '500', color: '#f4f4f5' },
-    estadoBadge: {
-        fontSize: '11px',
-        fontWeight: '600',
-        padding: '3px 8px',
-        borderRadius: '20px',
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-    },
-    reservaFecha: { fontSize: '13px', color: '#a1a1aa', margin: '0 0 4px' },
-    reservaHora: { fontSize: '12px', color: '#52525b', margin: 0 },
 };
 
 export default AutogestionResidente;
