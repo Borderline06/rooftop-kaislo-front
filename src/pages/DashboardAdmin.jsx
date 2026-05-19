@@ -2,98 +2,110 @@ import { useState, useEffect } from 'react';
 import api from '../services/api';
 
 const DashboardAdmin = () => {
-    const [logueado, setLogueado] = useState(false);
+    // 1. PERSISTENCIA: Inicializamos logueado leyendo el localStorage
+    const [logueado, setLogueado] = useState(!!localStorage.getItem('kaislo_token'));
+    
     const [usuario, setUsuario] = useState('');
     const [password, setPassword] = useState('');
     const [errorLogin, setErrorLogin] = useState('');
     const [reservas, setReservas] = useState([]);
     const [cargando, setCargando] = useState(true);
+    // Nuevos estados para paginación
+    const [paginaActual, setPaginaActual] = useState(0);
+    const [totalPaginas, setTotalPaginas] = useState(0);
+    
+    // 2. CANDADOS ASÍNCRONOS
+    const [procesandoLogin, setProcesandoLogin] = useState(false);
+    const [procesandoCancelacion, setProcesandoCancelacion] = useState(null); // Guarda el ID de la reserva cancelándose
 
     const cargarReservas = async () => {
         setCargando(true);
         try {
-            const respuesta = await api.get('/reservas');
-            setReservas(respuesta.data);
+            // Le pasamos la página actual y le pedimos 5 registros por página
+            const respuesta = await api.get(`/reservas?page=${paginaActual}&size=5`);
+            
+            // Spring Boot mete los datos dentro del atributo "content"
+            setReservas(respuesta.data.content); 
+            setTotalPaginas(respuesta.data.totalPages);
         } catch (error) {
             console.error("Error al cargar reservas:", error);
+            if (error.response?.status === 401 || error.response?.status === 403) {
+                cerrarSesion();
+            }
         } finally {
             setCargando(false);
         }
     };
 
-    useEffect(() => { if (logueado) cargarReservas(); }, [logueado]);
+    
+    useEffect(() => { 
+        if (logueado) cargarReservas(); 
+    }, [logueado, paginaActual]);
 
     const manejarLogin = async (e) => {
         e.preventDefault();
+        if (procesandoLogin) return; // Evita doble clic
+        
         setErrorLogin('');
+        setProcesandoLogin(true);
+        
         try {
-            await api.post('/admin/login', { usuarioAcceso: usuario, password });
+            const respuesta = await api.post('/admin/login', { usuarioAcceso: usuario, password });
+            
+            // Guardamos el token real en el navegador
+            localStorage.setItem('kaislo_token', respuesta.data.token);
             setLogueado(true);
         } catch {
             setErrorLogin('Credenciales incorrectas. Acceso denegado.');
+        } finally {
+            setProcesandoLogin(false);
         }
     };
 
+    const cerrarSesion = () => {
+        localStorage.removeItem('kaislo_token');
+        setLogueado(false);
+        setUsuario('');
+        setPassword('');
+    };
+
     const cancelarReserva = async (idReserva) => {
+        if (procesandoCancelacion) return; // Previene doble clic en cancelar
+        
         if (window.confirm("¿Seguro que deseas cancelar esta reserva?")) {
+            setProcesandoCancelacion(idReserva);
             try {
                 await api.put(`/reservas/${idReserva}/estado?estado=Cancelada`);
                 cargarReservas();
-            } catch {
+            } catch (err) {
                 alert("Error al cancelar la reserva");
+            } finally {
+                setProcesandoCancelacion(null);
             }
         }
     };
 
-    const formatearFecha = (fecha) => {
-        if (!fecha) return '';
-        const [y, m, d] = fecha.split('-');
-        return `${d}/${m}/${y}`;
-    };
-
+    // Estadísticas
+    const totalReservas = reservas.length;
     const confirmadas = reservas.filter(r => r.estado === 'Confirmada').length;
     const canceladas = reservas.filter(r => r.estado === 'Cancelada').length;
 
-    // ── LOGIN ──
+    // --- VISTA 1: LOGIN ---
     if (!logueado) {
         return (
-            <div style={s.loginPage}>
-                <div style={s.loginCard}>
-                    <div style={{ textAlign: 'center', marginBottom: '28px' }}>
-                        <div style={s.loginIcon}>🔥</div>
-                        <h2 style={s.loginTitle}>Kaislo Admin</h2>
-                        <p style={s.loginSub}>Panel de control interno</p>
-                    </div>
-
-                    {errorLogin && (
-                        <div style={s.alertError}>⚠️ {errorLogin}</div>
-                    )}
-
-                    <form onSubmit={manejarLogin} style={s.loginForm}>
-                        <div style={s.field}>
-                            <label style={s.label}>Usuario</label>
-                            <input
-                                type="text"
-                                required
-                                placeholder="admin"
-                                value={usuario}
-                                onChange={e => setUsuario(e.target.value)}
-                                style={s.input}
-                            />
-                        </div>
-                        <div style={s.field}>
-                            <label style={s.label}>Contraseña</label>
-                            <input
-                                type="password"
-                                required
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={e => setPassword(e.target.value)}
-                                style={s.input}
-                            />
-                        </div>
-                        <button type="submit" style={s.btnPrimary}>
-                            Ingresar →
+            <div style={s.containerLogin}>
+                <div style={s.cardLogin}>
+                    <h2 style={s.titleLogin}>Kaislo Admin</h2>
+                    {errorLogin && <p style={s.alertError}>{errorLogin}</p>}
+                    <form onSubmit={manejarLogin} style={s.form}>
+                        <input type="text" placeholder="Usuario" required value={usuario} onChange={e => setUsuario(e.target.value)} style={s.input} />
+                        <input type="password" placeholder="Contraseña" required value={password} onChange={e => setPassword(e.target.value)} style={s.input} />
+                        <button 
+                            type="submit" 
+                            disabled={procesandoLogin} 
+                            style={{ ...s.btnPrimary, opacity: procesandoLogin ? 0.7 : 1, cursor: procesandoLogin ? 'not-allowed' : 'pointer' }}
+                        >
+                            {procesandoLogin ? 'Verificando...' : 'Ingresar'}
                         </button>
                     </form>
                 </div>
@@ -101,94 +113,106 @@ const DashboardAdmin = () => {
         );
     }
 
-    // ── DASHBOARD ──
+    // --- VISTA 2: DASHBOARD ---
     return (
-        <div style={s.page}>
-            {/* TOPBAR */}
-            <header style={s.topbar}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '20px' }}>🔥</span>
-                    <span style={s.topbarTitle}>Kaislo Rooftop — Admin</span>
+        <div style={s.containerDash}>
+            <div style={s.headerDash}>
+                <div>
+                    <h1 style={s.titleDash}>Panel de Control</h1>
+                    <p style={s.subtitleDash}>Inmobiliaria Kaislo</p>
                 </div>
-                <button onClick={() => setLogueado(false)} style={s.btnLogout}>
-                    Cerrar Sesión
-                </button>
-            </header>
+                <button onClick={cerrarSesion} style={s.btnLogout}>Cerrar Sesión</button>
+            </div>
 
-            <main style={s.main}>
-                {/* STATS */}
-                <div style={s.statsGrid}>
-                    <div style={s.statCard}>
-                        <p style={s.statLabel}>Total Reservas</p>
-                        <p style={s.statNum}>{reservas.length}</p>
-                    </div>
-                    <div style={s.statCard}>
-                        <p style={s.statLabel}>Confirmadas</p>
-                        <p style={{ ...s.statNum, color: '#22c55e' }}>{confirmadas}</p>
-                    </div>
-                    <div style={s.statCard}>
-                        <p style={s.statLabel}>Canceladas</p>
-                        <p style={{ ...s.statNum, color: '#ef4444' }}>{canceladas}</p>
-                    </div>
+            <div style={s.statsGrid}>
+                <div style={s.statCard}><div style={s.statValue}>{totalReservas}</div><div style={s.statLabel}>Total</div></div>
+                <div style={s.statCard}><div style={{...s.statValue, color: '#10b981'}}>{confirmadas}</div><div style={s.statLabel}>Confirmadas</div></div>
+                <div style={s.statCard}><div style={{...s.statValue, color: '#ef4444'}}>{canceladas}</div><div style={s.statLabel}>Canceladas</div></div>
+            </div>
+
+            <div style={s.tableContainer}>
+                <div style={s.tableHeader}>
+                    <h3 style={s.tableTitle}>Gestión de Turnos</h3>
+                    <button onClick={cargarReservas} style={s.btnRefresh}>{cargando ? '↻' : 'Actualizar'}</button>
                 </div>
-
-                {/* TABLA */}
-                <div style={s.tableCard}>
-                    <div style={s.tableHeader}>
-                        <h2 style={s.tableTitle}>Gestión de Reservas</h2>
-                        <button onClick={cargarReservas} style={s.btnRefresh}>↻ Actualizar</button>
-                    </div>
-
-                    {cargando ? (
-                        <p style={s.empty}>Cargando...</p>
-                    ) : reservas.length === 0 ? (
-                        <p style={s.empty}>No hay reservas registradas.</p>
-                    ) : (
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={s.table}>
-                                <thead>
-                                <tr>
-                                    {['ID', 'Residente', 'Fecha', 'Turno', 'Estado', 'Acción'].map(col => (
-                                        <th key={col} style={s.th}>{col}</th>
-                                    ))}
+                
+                {cargando ? (
+                    <p style={s.empty}>Cargando datos del servidor...</p>
+                ) : reservas.length === 0 ? (
+                    <p style={s.empty}>No hay reservas registradas en el sistema.</p>
+                ) : (
+                    <table style={s.table}>
+                        <thead>
+                            <tr>
+                                <th style={s.th}>ID</th>
+                                <th style={s.th}>Residente</th>
+                                <th style={s.th}>Fecha</th>
+                                <th style={s.th}>Horario</th>
+                                <th style={s.th}>Estado</th>
+                                <th style={s.th}>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {reservas.map(reserva => (
+                                <tr key={reserva.idReserva} style={s.tr}>
+                                    <td style={s.td}>#{reserva.idReserva}</td>
+                                    <td style={s.td}>Residente {reserva.residente?.idResidente || 'N/A'}</td>
+                                    <td style={s.td}>{reserva.fechaReserva}</td>
+                                    <td style={s.td}>{reserva.horaInicio} - {reserva.horaFin}</td>
+                                    <td style={s.td}>
+                                        <span style={{
+                                            padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '600',
+                                            background: reserva.estado === 'Confirmada' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                                            color: reserva.estado === 'Confirmada' ? '#10b981' : '#ef4444'
+                                        }}>
+                                            {reserva.estado}
+                                        </span>
+                                    </td>
+                                    <td style={s.td}>
+                                        {reserva.estado === 'Confirmada' && (
+                                            <button 
+                                                onClick={() => cancelarReserva(reserva.idReserva)} 
+                                                disabled={procesandoCancelacion === reserva.idReserva}
+                                                style={{ 
+                                                    ...s.btnAction, 
+                                                    opacity: procesandoCancelacion === reserva.idReserva ? 0.5 : 1,
+                                                    cursor: procesandoCancelacion === reserva.idReserva ? 'not-allowed' : 'pointer'
+                                                }}
+                                            >
+                                                {procesandoCancelacion === reserva.idReserva ? 'Cancelando...' : 'Cancelar'}
+                                            </button>
+                                        )}
+                                    </td>
                                 </tr>
-                                </thead>
-                                <tbody>
-                                {reservas.map((r, i) => (
-                                    <tr key={r.idReserva} style={{ background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
-                                        <td style={s.td}>#{r.idReserva}</td>
-                                        <td style={s.td}>{r.residente?.idResidente || 'N/A'}</td>
-                                        <td style={s.td}>{formatearFecha(r.fechaReserva)}</td>
-                                        <td style={s.td}>
-                                            {r.horaInicio?.startsWith('12') ? '🌤 Tarde' : '🌙 Noche'}
-                                        </td>
-                                        <td style={s.td}>
-                                                <span style={{
-                                                    ...s.badge,
-                                                    background: r.estado === 'Confirmada' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                                                    color: r.estado === 'Confirmada' ? '#22c55e' : '#ef4444',
-                                                }}>
-                                                    {r.estado}
-                                                </span>
-                                        </td>
-                                        <td style={s.td}>
-                                            {r.estado === 'Confirmada' && (
-                                                <button
-                                                    onClick={() => cancelarReserva(r.idReserva)}
-                                                    style={s.btnCancel}
-                                                >
-                                                    Cancelar
-                                                </button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                                </tbody>
-                            </table>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+                {/* CONTROLES DE PAGINACIÓN */}
+                {!cargando && totalPaginas > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderTop: '1px solid #2e2e36' }}>
+                        <span style={{ color: '#a1a1aa', fontSize: '13px' }}>
+                            Página {paginaActual + 1} de {totalPaginas}
+                        </span>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button 
+                                onClick={() => setPaginaActual(prev => Math.max(prev - 1, 0))}
+                                disabled={paginaActual === 0}
+                                style={{ ...s.btnRefresh, opacity: paginaActual === 0 ? 0.5 : 1, cursor: paginaActual === 0 ? 'not-allowed' : 'pointer' }}
+                            >
+                                ← Anterior
+                            </button>
+                            <button 
+                                onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas - 1))}
+                                disabled={paginaActual >= totalPaginas - 1}
+                                style={{ ...s.btnRefresh, opacity: paginaActual >= totalPaginas - 1 ? 0.5 : 1, cursor: paginaActual >= totalPaginas - 1 ? 'not-allowed' : 'pointer' }}
+                            >
+                                Siguiente →
+                            </button>
                         </div>
-                    )}
-                </div>
-            </main>
+                    </div>
+                )}
+            </div>
         </div>
     );
 };

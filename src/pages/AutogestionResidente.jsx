@@ -7,43 +7,99 @@ const AutogestionResidente = () => {
     const [error, setError] = useState('');
     const [exito, setExito] = useState(false);
 
+    // Solo debe existir UNA copia de este bloque:
     const [idResidente, setIdResidente] = useState('');
+    const [pin, setPin] = useState(''); // El nuevo estado del PIN
     const [fechaReserva, setFechaReserva] = useState('');
     const [turnoSeleccionado, setTurnoSeleccionado] = useState('12:00:00-17:00:00');
 
-    const cargarReservas = async () => {
-        try {
-            const respuesta = await api.get('/reservas');
-            setReservas(respuesta.data);
-        } catch (error) {
-            console.error("Error al cargar:", error);
-        } finally {
-            setCargando(false);
-        }
+    const [paginaActual, setPaginaActual] = useState(0);
+    const [totalPaginas, setTotalPaginas] = useState(0);
+
+    //para prevenir el spam de clics
+    const [enviando, setEnviando] = useState(false);
+
+    // Función para obtener la fecha de hoy en formato YYYY-MM-DD
+    const obtenerFechaHoy = () => {
+        const hoy = new Date();
+        const yyyy = hoy.getFullYear();
+        const mm = String(hoy.getMonth() + 1).padStart(2, '0');
+        const dd = String(hoy.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
     };
 
-    useEffect(() => { cargarReservas(); }, []);
+    const cargarReservas = async () => {
+            try {
+                // Le enviamos la página actual al servidor
+                const respuesta = await api.get(`/reservas?page=${paginaActual}&size=6`); // Traemos de 6 en 6 para que la cuadrícula se vea simétrica
+                setReservas(respuesta.data.content || []);
+                setTotalPaginas(respuesta.data.totalPages || 0); // Guardamos el total de páginas
+            } catch (error) {
+                console.error("Error al cargar:", error);
+            } finally {
+                setCargando(false);
+            }
+        };
+
+        // Ahora React volverá a cargar si el usuario cambia de página
+        useEffect(() => { 
+            cargarReservas(); 
+        }, [paginaActual]);
+
+
+    // Analiza si el turno seleccionado ya está tomado en la fecha elegida
+    const verificarTurnoOcupado = () => {
+        if (!fechaReserva) return false;
+        const [inicioSel, finSel] = turnoSeleccionado.split('-');
+        
+        return reservas.some(reserva => 
+            reserva.fechaReserva === fechaReserva && 
+            reserva.horaInicio === inicioSel && 
+            reserva.horaFin === finSel &&
+            reserva.estado === 'Confirmada'
+        );
+    };
+
+    const turnoYaReservado = verificarTurnoOcupado();
 
     const manejarSubmit = async (e) => {
         e.preventDefault();
+        
+        
+        if (enviando) return; 
+
         setError('');
-        setExito(false);
+        setEnviando(true); 
+        
         const [inicio, fin] = turnoSeleccionado.split('-');
+
         try {
-            await api.post('/reservas', {
-                residente: { idResidente: parseInt(idResidente) },
-                fechaReserva,
+            const nuevaReserva = {
+                residente: { 
+                    idResidente: parseInt(idResidente),
+                    pinAcceso: pin 
+                },
+                fechaReserva: fechaReserva,
                 horaInicio: inicio,
                 horaFin: fin
-            });
+            };
+
+            await api.post('/reservas', nuevaReserva);
+            
             setExito(true);
-            setIdResidente('');
+            setTimeout(() => setExito(false), 4000);
+            
+            // Limpiamos los campos
+            setIdResidente(''); 
+            setPin(''); 
             setFechaReserva('');
             setTurnoSeleccionado('12:00:00-17:00:00');
             cargarReservas();
-            setTimeout(() => setExito(false), 4000);
+            
         } catch (err) {
-            setError(err.response?.data || "El turno ya está ocupado o el ID no existe.");
+            setError(err.response?.data || "Error al reservar. El turno ya está ocupado.");
+        } finally {
+            setEnviando(false); 
         }
     };
 
@@ -77,15 +133,23 @@ const AutogestionResidente = () => {
                         Reservar un Turno
                     </h2>
 
-                    {error && (
-                        <div style={s.alertError}>
-                            <span>⚠️</span> {error}
-                        </div>
-                    )}
-                    {exito && (
-                        <div style={s.alertSuccess}>
-                            <span>✅</span> ¡Turno reservado con éxito!
-                        </div>
+                    {error && <p style={s.error}>{error}</p>}
+                    {exito && <p style={s.exito}>¡Reserva confirmada con éxito!</p>}
+                    
+                    {/* ALERTA PREVENTIVA SI EL HORARIO YA ESTÁ RESERVADO */}
+                    {turnoYaReservado && (
+                        <p style={{ 
+                            background: 'rgba(234, 179, 8, 0.1)', 
+                            color: '#eab308', 
+                            padding: '12px', 
+                            borderRadius: '8px', 
+                            fontSize: '14px', 
+                            marginBottom: '16px', 
+                            border: '1px solid rgba(234, 179, 8, 0.2)',
+                            textAlign: 'center'
+                        }}>
+                            ⚠️ Este turno ya se encuentra reservado por otro residente. Por favor, elija otra fecha u horario.
+                        </p>
                     )}
 
                     <form onSubmit={manejarSubmit} style={s.form}>
@@ -101,14 +165,27 @@ const AutogestionResidente = () => {
                                     style={s.input}
                                 />
                             </div>
+
+                            <div>
+                                <label style={{ color: '#f4f4f5', fontSize: '14px', marginBottom: '8px', display: 'block' }}>ID Residente:</label>
+                                <input type="number" required value={idResidente} onChange={e => setIdResidente(e.target.value)} style={s.input} />
+                            </div>
+                            
+                            {/* --- NUEVO INPUT DE PIN --- */}
+                            <div>
+                                <label style={{ color: '#f4f4f5', fontSize: '14px', marginBottom: '8px', display: 'block' }}>PIN de Acceso:</label>
+                                <input type="password" required value={pin} onChange={e => setPin(e.target.value)} style={{...s.input, width: '120px'}} placeholder="****" />
+                            </div>
+                            {/* -------------------------- */}
                             <div style={s.field}>
                                 <label style={s.label}>Fecha</label>
-                                <input
-                                    type="date"
-                                    required
-                                    value={fechaReserva}
-                                    onChange={e => setFechaReserva(e.target.value)}
-                                    style={s.input}
+                                <input 
+                                    type="date" 
+                                    required 
+                                    value={fechaReserva} 
+                                    min={obtenerFechaHoy()} 
+                                    onChange={e => setFechaReserva(e.target.value)} 
+                                    style={s.input} 
                                 />
                             </div>
                             <div style={s.field}>
@@ -123,9 +200,17 @@ const AutogestionResidente = () => {
                                 </select>
                             </div>
                         </div>
-                        <button type="submit" style={s.btn}>
-                            Confirmar Turno →
-                        </button>
+                        <button 
+                        type="submit" 
+                        disabled={enviando || turnoYaReservado} // Bloqueado si está cargando o si el turno ya fue tomado
+                        style={{ 
+                            ...s.btn, 
+                            opacity: (enviando || turnoYaReservado) ? 0.5 : 1, 
+                            cursor: (enviando || turnoYaReservado) ? 'not-allowed' : 'pointer' 
+                        }}
+                    >
+                        {enviando ? 'Procesando...' : 'Confirmar Turno'}
+                    </button>
                     </form>
                 </section>
 
@@ -155,6 +240,39 @@ const AutogestionResidente = () => {
                                     <p style={s.reservaHora}>🕐 {r.horaInicio?.slice(0,5)} – {r.horaFin?.slice(0,5)}</p>
                                 </div>
                             ))}
+                        </div>
+                    )}
+
+                                    {/* CONTROLES DE PAGINACIÓN DEL RESIDENTE */}
+                    {!cargando && totalPaginas > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '24px', alignItems: 'center' }}>
+                            <button 
+                                onClick={() => setPaginaActual(prev => Math.max(prev - 1, 0))}
+                                disabled={paginaActual === 0}
+                                style={{ 
+                                    background: 'transparent', border: '1px solid #2e2e36', color: '#f4f4f5', 
+                                    borderRadius: '6px', padding: '8px 16px', cursor: paginaActual === 0 ? 'not-allowed' : 'pointer',
+                                    opacity: paginaActual === 0 ? 0.5 : 1
+                                }}
+                            >
+                                ← Anteriores
+                            </button>
+                            
+                            <span style={{ color: '#a1a1aa', fontSize: '14px' }}>
+                                Página {paginaActual + 1} de {totalPaginas}
+                            </span>
+                            
+                            <button 
+                                onClick={() => setPaginaActual(prev => Math.min(prev + 1, totalPaginas - 1))}
+                                disabled={paginaActual >= totalPaginas - 1}
+                                style={{ 
+                                    background: 'transparent', border: '1px solid #2e2e36', color: '#f4f4f5', 
+                                    borderRadius: '6px', padding: '8px 16px', cursor: paginaActual >= totalPaginas - 1 ? 'not-allowed' : 'pointer',
+                                    opacity: paginaActual >= totalPaginas - 1 ? 0.5 : 1
+                                }}
+                            >
+                                Siguientes →
+                            </button>
                         </div>
                     )}
                 </section>
