@@ -1,16 +1,38 @@
-# React + Vite
+# 💻 Kaislo Rooftop - Interfaz Web (Front-End)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Portal de autogestión de reservas para residentes y centro de mando administrativo para el edificio Kaislo. Diseñado con un enfoque en la experiencia de usuario (UX), seguridad de sesiones y sincronización de datos en tiempo real.
 
-Currently, two official plugins are available:
+## 🚀 Tecnologías y Herramientas
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Core: React 18 + Vite
+- Enrutamiento: React Router DOM
+- Peticiones HTTP: Axios (con interceptores dinámicos para JWT)
+- Componentes UI: React DatePicker
+- Estilos: CSS estructurado e integrado en componentes
 
-## React Compiler
+## ⚙️ Características Clave
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Sincronización en Tiempo Real: Implementación de "Short Polling" (actualización silenciosa cada 5 segundos) para reflejar nuevas reservas y cancelaciones instantáneamente, previniendo el cruce de horarios.
+- Seguridad y Aislamiento (Anti-Colisión): Manejo de sesiones independiente para administradores (admin_token) y vecinos (vecino_token) mediante interceptores de Axios que evalúan la ruta activa.
+- Resiliencia (UX): Sistema blindado contra caídas de renderizado (Pantalla Negra) mediante la extracción limpia y segura de mensajes de error JSON provenientes de las respuestas HTTP (ej. 403 Forbidden).
 
-## Expanding the ESLint configuration
+## 🛠️ Instalación y Ejecución Local
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Clonar el repositorio e ingresar a la carpeta del proyecto:
+   git clone https://github.com/Borderline06/rooftop-kaislo-front.git
+   cd rooftop-frontend
+
+2. Instalar las dependencias de Node.js:
+   npm install
+
+3. Configurar las variables de entorno. Crea un archivo llamado ".env" en la raíz del proyecto y añade la ruta de tu Back-End:
+   VITE_API_URL=http://localhost:8080/api
+
+4. Levantar el entorno de desarrollo:
+   npm run dev
+
+(El proyecto se ejecutará por defecto en http://localhost:5173)
+
+---
+
+Desarrollado para Kaislo Inmobiliaria.

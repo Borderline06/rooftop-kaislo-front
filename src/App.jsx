@@ -1,21 +1,25 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import AdminLogin from './pages/AdminLogin';
+import PanelAdmin from './pages/PanelAdmin';
 
-// Importamos las dos vistas que hemos construido
+
 import AutogestionResidente from './pages/AutogestionResidente'; 
-import DashboardAdmin from './pages/DashboardAdmin'; 
+
 
 function App() {
     return (
         <Router>
             <Routes>
-                {/* 1. LA RUTA PÚBLICA (El código QR apuntará aquí) */}
+                {/* 1. RUTA PÚBLICA  */}
                 <Route path="/" element={<AutogestionResidente />} />
 
-                {/* 2. LA RUTA PRIVADA (Solo para la Inmobiliaria) */}
-                <Route path="/admin/dashboard" element={<DashboardAdmin />} />
+                
 
-                {/* 3. REDIRECCIÓN DE SEGURIDAD (Si escriben una URL que no existe, los manda al inicio) */}
+                {/* REDIRECCIÓN*/}
                 <Route path="*" element={<Navigate to="/" />} />
+
+                <Route path="/admin/login" element={<AdminLogin />} />
+                <Route path="/admin/panel" element={<PanelAdmin />} />
             </Routes>
         </Router>
     );

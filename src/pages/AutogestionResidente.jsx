@@ -5,7 +5,6 @@ import DatePicker, { registerLocale } from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { es } from 'date-fns/locale/es'; 
 
-
 registerLocale('es', es);
 
 const TURNOS_DISPONIBLES = [
@@ -16,71 +15,80 @@ const TURNOS_DISPONIBLES = [
 ];
 
 const AutogestionResidente = () => {
-    // SESIÓN DEL VECINO
-    const [residenteLogueado, setResidenteLogueado] = useState(null); // Guarda { numeroDepartamento, pinAcceso }
-    const [vistaActual, setVistaActual] = useState('NUEVA_RESERVA'); // 'NUEVA_RESERVA' o 'MIS_RESERVAS'
+    const [residenteLogueado, setResidenteLogueado] = useState(null); 
+    const [vistaActual, setVistaActual] = useState('NUEVA_RESERVA'); 
 
-    // ESTADOS FORMULARIO LOGIN
     const [depaLogin, setDepaLogin] = useState('');
     const [pinLogin, setPinLogin] = useState('');
     const [errorLogin, setErrorLogin] = useState('');
 
-    // ESTADOS RESERVA
     const [fechaReserva, setFechaReserva] = useState('');
     const [turnoSeleccionado, setTurnoSeleccionado] = useState('');
     
-    // DATOS DEL SISTEMA
     const [todasLasReservas, setTodasLasReservas] = useState([]);
     const [procesando, setProcesando] = useState(false);
     const [mensaje, setMensaje] = useState({ texto: '', tipo: '' });
     const [mostrarModal, setMostrarModal] = useState(false);
 
+    // 1. RECUPERAR SESIÓN
     useEffect(() => {
-        // 1. Buscamos en la bóveda del navegador
         const tokenGuardado = localStorage.getItem('vecino_token');
         const depaGuardado = localStorage.getItem('vecino_depa');
+        const pinGuardado = localStorage.getItem('vecino_pin'); 
 
-        // 2. Si ambas cosas existen, significa que el usuario ya se había logueado antes
-        if (tokenGuardado && depaGuardado) {
-            // 3. Restauramos la sesión en la memoria RAM de React
+        if (tokenGuardado && depaGuardado && pinGuardado) {
             setResidenteLogueado({ 
-                numeroDepartamento: depaGuardado 
+                numeroDepartamento: depaGuardado,
+                pinAcceso: pinGuardado
             });
         }
     }, []);
 
-    const cargarReservasGlobales = async () => {
-        try {
-            const respuesta = await api.get('/reservas?page=0&size=100'); 
-            const confirmadas = (respuesta.data.content || []).filter(r => r.estado === 'Confirmada');
-            setTodasLasReservas(confirmadas);
-        } catch (error) {
-            console.error("Error al cargar disponibilidad:", error);
-        }
-    };
-
+    
     useEffect(() => {
-        if (residenteLogueado) cargarReservasGlobales();
+        let motorActualizacion;
+
+        // Metemos la función DENTRO del useEffect para evitar "Stale Closures"
+        const traerDatosFrescos = async () => {
+            try {
+                const respuesta = await api.get('/reservas?page=0&size=500'); 
+                const confirmadas = (respuesta.data.content || [])
+                    .filter(r => r.estado === 'Confirmada')
+                    .sort((a, b) => b.idReserva - a.idReserva); 
+                
+                setTodasLasReservas(confirmadas);
+            } catch (error) {
+                console.error("Error al cargar disponibilidad:", error);
+            }
+        };
+
+        if (residenteLogueado) {
+            traerDatosFrescos(); 
+            motorActualizacion = setInterval(traerDatosFrescos, 5000); 
+        }
+
+        return () => {
+            if (motorActualizacion) clearInterval(motorActualizacion);
+        };
     }, [residenteLogueado]);
 
     // --- LÓGICA DE LOGIN ---
     const manejarLogin = async (e) => {
         e.preventDefault();
         setErrorLogin('');
-        setMensaje({ texto: '', tipo: '' }); // Limpiamos alertas previas
+        setMensaje({ texto: '', tipo: '' }); 
         setProcesando(true);
         try {
-            // Recibimos la respuesta completa que ahora trae el token
             const respuesta = await api.post('/reservas/vecino/login', { 
                 numeroDepartamento: depaLogin, 
                 pinAcceso: pinLogin 
             });
             
-            //Guardamos el token y el depa en el LocalStorage
-            localStorage.setItem('vecino_token', respuesta.data.token);
-            localStorage.setItem('vecino_depa', respuesta.data.numeroDepartamento); // <-- ¡ESTA LÍNEA FALTABA!
             
-            // Guardamos el estado para la interfaz
+            localStorage.setItem('vecino_token', respuesta.data.token);
+            localStorage.setItem('vecino_depa', respuesta.data.numeroDepartamento); 
+            localStorage.setItem('vecino_pin', pinLogin); 
+            
             setResidenteLogueado({ 
                 numeroDepartamento: respuesta.data.numeroDepartamento, 
                 pinAcceso: pinLogin 
@@ -101,8 +109,10 @@ const AutogestionResidente = () => {
         setFechaReserva('');
         setTurnoSeleccionado('');
         
-        //LIMPIEZA: Borramos la llave al salir
+       
         localStorage.removeItem('vecino_token');
+        localStorage.removeItem('vecino_depa');
+        localStorage.removeItem('vecino_pin');
     };
 
     // --- LÓGICA DE RESERVAS ---
@@ -126,12 +136,22 @@ const AutogestionResidente = () => {
             setFechaReserva('');
             setTurnoSeleccionado('');
             setMostrarModal(false);
-            cargarReservasGlobales();
-            setVistaActual('MIS_RESERVAS'); // Lo mandamos a ver su reserva
+            
+           
+            const respuesta = await api.get('/reservas?page=0&size=500'); 
+            const confirmadas = (respuesta.data.content || []).filter(r => r.estado === 'Confirmada').sort((a, b) => b.idReserva - a.idReserva);
+            setTodasLasReservas(confirmadas);
+
+            setVistaActual('MIS_RESERVAS'); 
             setTimeout(() => setMensaje({ texto: '', tipo: '' }), 4000);
         } catch (error) {
             setMostrarModal(false);
-            setMensaje({ texto: error.response?.data || "Error al reservar.", tipo: 'error' });
+            const dataError = error.response?.data;
+            const textoSeguro = typeof dataError === 'string' 
+                ? dataError 
+                : (dataError?.error || dataError?.message || "Error de permisos al reservar.");
+            
+            setMensaje({ texto: textoSeguro, tipo: 'error' });
         } finally {
             setProcesando(false);
         }
@@ -141,19 +161,20 @@ const AutogestionResidente = () => {
         if (window.confirm("¿Seguro que deseas cancelar esta reserva? Este horario quedará libre para otros vecinos.")) {
             try {
                 await api.put(`/reservas/${idReserva}/estado?estado=Cancelada`);
-                cargarReservasGlobales();
+                
+                const respuesta = await api.get('/reservas?page=0&size=500'); 
+                const confirmadas = (respuesta.data.content || []).filter(r => r.estado === 'Confirmada').sort((a, b) => b.idReserva - a.idReserva);
+                setTodasLasReservas(confirmadas);
             } catch (err) {
                 alert("Error al cancelar.");
             }
         }
     };
 
-    // Filtramos para mostrar solo las reservas del vecino logueado
     const misReservas = todasLasReservas.filter(r => r.residente?.numeroDepartamento === residenteLogueado?.numeroDepartamento);
-    const fechaMinima = new Date().toISOString().split('T')[0];
 
     // ==========================================
-    // PANTALLA 1: LOGIN VECINO (Wireframe 1)
+    // PANTALLA 1: LOGIN VECINO
     // ==========================================
     if (!residenteLogueado) {
         return (
@@ -188,7 +209,6 @@ const AutogestionResidente = () => {
     return (
         <div style={s.contenedorCentrado}>
             <div style={s.tarjeta}>
-                {/* Cabecera del Portal */}
                 <div style={s.cabecera}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
@@ -199,7 +219,6 @@ const AutogestionResidente = () => {
                     </div>
                 </div>
 
-                {/* Navegación de Pestañas */}
                 <div style={s.tabsContainer}>
                     <button onClick={() => setVistaActual('NUEVA_RESERVA')} style={vistaActual === 'NUEVA_RESERVA' ? s.tabActivo : s.tabInactivo}>
                         📅 Reservar
@@ -212,18 +231,14 @@ const AutogestionResidente = () => {
                 <div style={{ padding: '24px' }}>
                     {mensaje.texto && <div style={mensaje.tipo === 'error' ? s.alertaError : s.alertaExito}>{mensaje.texto}</div>}
 
-                    {/* VISTA: NUEVA RESERVA (Wireframe 2) */}
                     {vistaActual === 'NUEVA_RESERVA' && (
                         <div>
                             <div style={s.field}>
                                 <label style={s.label}>1. Elige una fecha</label>
-                                
-                                {/* EL NUEVO CALENDARIO */}
                                 <div style={s.calendarioContenedor}>
                                     <DatePicker
                                         selected={fechaReserva ? new Date(fechaReserva + 'T12:00:00') : null}
                                         onChange={(date) => {
-                                            // Convertimos la fecha de JS al formato YYYY-MM-DD que espera Java
                                             const fechaFormateada = date.toISOString().split('T')[0];
                                             setFechaReserva(fechaFormateada);
                                             setTurnoSeleccionado(''); 
@@ -263,7 +278,6 @@ const AutogestionResidente = () => {
                                         Confirmar Reserva
                                     </button>
 
-                                    {/* LISTA DE OCUPADOS DEL DÍA */}
                                     {fechaReserva && (
                                         <div style={{ marginTop: '32px', paddingTop: '20px', borderTop: '1px solid #e2e8f0' }}>
                                             <h4 style={{ fontSize: '14px', color: '#475569', marginBottom: '12px' }}>
@@ -277,7 +291,6 @@ const AutogestionResidente = () => {
                                                     {todasLasReservas
                                                         .filter(r => r.fechaReserva === fechaReserva)
                                                         .map(r => {
-                                                            // Buscamos el nombre del turno para mostrarlo bonito
                                                             const turnoInfo = TURNOS_DISPONIBLES.find(t => t.id === `${r.horaInicio}-${r.horaFin}`);
                                                             return (
                                                                 <div key={r.idReserva} style={{ display: 'flex', justifyContent: 'space-between', background: '#f1f5f9', padding: '10px 12px', borderRadius: '6px', fontSize: '13px' }}>
@@ -290,14 +303,11 @@ const AutogestionResidente = () => {
                                             )}
                                         </div>
                                     )}
-
-
                                 </div>
                             )}
                         </div>
                     )}
 
-                    {/* VISTA: MIS RESERVAS (Wireframe 3) */}
                     {vistaActual === 'MIS_RESERVAS' && (
                         <div>
                             <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#1e293b' }}>Tus horarios confirmados</h3>
@@ -323,13 +333,12 @@ const AutogestionResidente = () => {
                 </div>
             </div>
 
-            {/* MODAL DE CONFIRMACIÓN */}
             {mostrarModal && (
                 <div style={s.modalOverlay}>
                     <div style={s.modalContenido}>
                         <h2 style={s.modalTitulo}>Confirmar Reserva</h2>
                         <div style={s.modalDetalles}>
-                            <p>📅 <strong>{fechaReserva}</strong></p>
+                            <p>📅 <strong>{fechaReserva.split('-').reverse().join('-')}</strong></p>
                             <p>⏰ <strong>{TURNOS_DISPONIBLES.find(t => t.id === turnoSeleccionado)?.label}</strong></p>
                         </div>
                         <div style={s.modalBotones}>
@@ -343,7 +352,6 @@ const AutogestionResidente = () => {
     );
 };
 
-// ESTILOS
 const s = {
     contenedorCentrado: { minHeight: '100vh', background: '#f8fafc', padding: '20px', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', fontFamily: 'system-ui, sans-serif' },
     tarjeta: { background: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', overflow: 'hidden', marginTop: '2vh' },
@@ -351,29 +359,19 @@ const s = {
     titulo: { margin: 0, fontSize: '22px', fontWeight: '700' },
     subtitulo: { margin: '4px 0 0 0', fontSize: '14px', opacity: 0.9 },
     btnSalir: { background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' },
-    
-    // TABS
     tabsContainer: { display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' },
     tabActivo: { flex: 1, padding: '14px', background: '#ffffff', border: 'none', borderBottom: '2px solid #1e3a8a', color: '#1e3a8a', fontWeight: '600', fontSize: '14px', cursor: 'pointer' },
     tabInactivo: { flex: 1, padding: '14px', background: 'transparent', border: 'none', borderBottom: '2px solid transparent', color: '#64748b', fontWeight: '500', fontSize: '14px', cursor: 'pointer' },
-    
-    // FORMULARIO
     field: { display: 'flex', flexDirection: 'column', gap: '6px' },
     label: { fontSize: '13px', fontWeight: '600', color: '#334155' },
     inputBlanco: { width: '100%', padding: '12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '15px', outline: 'none', background: '#ffffff', color: '#0f172a', boxSizing: 'border-box' },
     gridHorarios: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
     btnHorario: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px', border: '2px solid', borderRadius: '10px', transition: 'all 0.2s' },
     btnPrimario: { width: '100%', padding: '14px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' },
-    
-    // ALERTAS
     alertaError: { background: '#fee2e2', color: '#991b1b', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center', border: '1px solid #fecaca', marginBottom: '16px' },
     alertaExito: { background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center', border: '1px solid #bbf7d0', marginBottom: '16px' },
-    
-    // MIS RESERVAS
     tarjetaReserva: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '12px' },
     btnEliminar: { background: '#fee2e2', color: '#ef4444', border: 'none', padding: '8px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' },
-    
-    // MODAL
     modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(15, 23, 42, 0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', zIndex: 1000 },
     modalContenido: { background: '#ffffff', padding: '24px', borderRadius: '16px', width: '100%', maxWidth: '320px' },
     modalTitulo: { margin: '0 0 16px 0', fontSize: '18px', color: '#1e293b', textAlign: 'center' },
@@ -381,12 +379,10 @@ const s = {
     modalBotones: { display: 'flex', gap: '10px' },
     btnCancelar: { flex: 1, padding: '12px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' },
     btnConfirmar: { flex: 1, padding: '12px', background: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' },
-
     calendarioContenedor: {
         display: 'flex',
         justifyContent: 'center',
         marginTop: '10px',
-        // Inyectamos variables CSS para sobreescribir el azul por defecto de la librería por el azul Kaislo
         '--react-datepicker-bg': '#ffffff',
         '--react-datepicker-primary-color': '#1e3a8a', 
     },
